@@ -1,242 +1,118 @@
 package com.almunassiq.ai
 
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
-import android.graphics.Typeface
 import android.os.Bundle
 import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
-import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.appcompat.widget.SwitchCompat
 
 class MainActivity : AppCompatActivity() {
-
-    private lateinit var statusValueText: TextView
-    private lateinit var permissionValueText: TextView
-    private lateinit var serviceSwitch: SwitchCompat
-    private lateinit var whatsappSwitch: SwitchCompat
-    private lateinit var messengerSwitch: SwitchCompat
-    private lateinit var chatAiSwitch: SwitchCompat
-    private lateinit var apiKeyInput: EditText
-    private lateinit var fallbackReplyInput: EditText
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val prefs = getSharedPreferences("munassiq_prefs", Context.MODE_PRIVATE)
+        val prefs = getSharedPreferences("almunassiq_prefs", Context.MODE_PRIVATE)
 
         val scrollView = ScrollView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.MATCH_PARENT
-            )
-            setPadding(36, 42, 36, 42)
+            setBackgroundColor(Color.parseColor("#121212"))
         }
 
-        val rootLayout = LinearLayout(this).apply {
+        val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            layoutDirection = View.LAYOUT_DIRECTION_RTL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
+            setPadding(48, 64, 48, 64)
         }
 
-        val titleText = TextView(this).apply {
+        val titleView = TextView(this).apply {
             text = "المنسّق أيه آي"
             textSize = 26f
-            setTypeface(typeface, Typeface.BOLD)
-            setTextColor(Color.parseColor("#111827"))
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, 24)
         }
 
-        val subtitleText = TextView(this).apply {
-            text = "لوحة تحكم الرد التلقائي على رسائل الشات وواتساب وماسنجر وGemini"
-            textSize = 14f
-            setTextColor(Color.parseColor("#4B5563"))
-            setPadding(0, 8, 0, 28)
+        val subtitleView = TextView(this).apply {
+            text = "إعدادات الرد التلقائي الذكي عبر Gemini"
+            textSize = 15f
+            setTextColor(Color.LTGRAY)
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, 40)
         }
 
-        statusValueText = TextView(this).apply {
-            textSize = 14f
-            setPadding(0, 4, 0, 12)
+        val apiKeyLabel = TextView(this).apply {
+            text = "مفتاح Gemini API"
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            setPadding(0, 0, 0, 12)
         }
 
-        serviceSwitch = SwitchCompat(this).apply {
+        val apiKeyInput = EditText(this).apply {
+            hint = "الصق مفتاح API هنا"
+            setHintTextColor(Color.GRAY)
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.parseColor("#1E1E1E"))
+            setPadding(32, 28, 32, 28)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setText(prefs.getString("gemini_api_key", ""))
+        }
+
+        val autoReplySwitch = Switch(this).apply {
             text = "تفعيل الرد التلقائي"
             textSize = 16f
-            setPadding(0, 10, 0, 18)
-            isChecked = prefs.getBoolean("service_enabled", true)
-            setOnCheckedChangeListener { _, isChecked ->
-                updateStatusLabel(isChecked)
-            }
+            setTextColor(Color.WHITE)
+            setPadding(0, 36, 0, 36)
+            isChecked = prefs.getBoolean("auto_reply_enabled", false)
         }
-        updateStatusLabel(serviceSwitch.isChecked)
 
-        permissionValueText = TextView(this).apply {
-            textSize = 14f
-            setPadding(0, 8, 0, 10)
+        val saveButton = Button(this).apply {
+            text = "حفظ الإعدادات"
+            textSize = 16f
+            setPadding(0, 28, 0, 28)
+            setOnClickListener {
+                val key = apiKeyInput.text?.toString()?.trim().orEmpty()
+                val enabled = autoReplySwitch.isChecked
+                prefs.edit()
+                    .putString("gemini_api_key", key)
+                    .putBoolean("auto_reply_enabled", enabled)
+                    .apply()
+                Toast.makeText(this@MainActivity, "تم حفظ الإعدادات بنجاح", Toast.LENGTH_SHORT).show()
+            }
         }
 
         val permissionButton = Button(this).apply {
-            text = "فتح إعدادات إذن الإشعارات"
+            text = "فتح إذن الوصول للإشعارات"
+            textSize = 15f
+            setPadding(0, 28, 0, 28)
+            val params = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = 24
+            }
+            layoutParams = params
             setOnClickListener {
                 startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             }
         }
 
-        val targetsLabel = TextView(this).apply {
-            text = "التطبيقات المستهدفة"
-            textSize = 18f
-            setTypeface(typeface, Typeface.BOLD)
-            setPadding(0, 28, 0, 10)
-        }
+        layout.addView(titleView)
+        layout.addView(subtitleView)
+        layout.addView(apiKeyLabel)
+        layout.addView(apiKeyInput)
+        layout.addView(autoReplySwitch)
+        layout.addView(saveButton)
+        layout.addView(permissionButton)
 
-        whatsappSwitch = SwitchCompat(this).apply {
-            text = "واتساب (WhatsApp)"
-            textSize = 15f
-            setPadding(0, 8, 0, 8)
-            isChecked = prefs.getBoolean("whatsapp_enabled", true)
-        }
-
-        messengerSwitch = SwitchCompat(this).apply {
-            text = "ماسنجر (Messenger)"
-            textSize = 15f
-            setPadding(0, 8, 0, 8)
-            isChecked = prefs.getBoolean("messenger_enabled", true)
-        }
-
-        chatAiSwitch = SwitchCompat(this).apply {
-            text = "تطبيقات الشات و Gemini"
-            textSize = 15f
-            setPadding(0, 8, 0, 16)
-            isChecked = prefs.getBoolean("chat_ai_enabled", true)
-        }
-
-        val settingsLabel = TextView(this).apply {
-            text = "إعدادات الرد و Gemini"
-            textSize = 18f
-            setTypeface(typeface, Typeface.BOLD)
-            setPadding(0, 16, 0, 10)
-        }
-
-        apiKeyInput = EditText(this).apply {
-            hint = "مفتاح Gemini API (اختياري حالياً)"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setText(prefs.getString("gemini_api_key", "") ?: "")
-            setPadding(20, 20, 20, 20)
-        }
-
-        fallbackReplyInput = EditText(this).apply {
-            hint = "الرد الافتراضي عند عدم توفر مفتاح أو اتصال"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_MULTI_LINE
-            minLines = 2
-            setText(
-                prefs.getString(
-                    "fallback_reply",
-                    "تم استلام رسالتك، سنرد عليك قريباً."
-                ) ?: ""
-            )
-            setPadding(20, 20, 20, 20)
-        }
-
-        val saveButton = Button(this).apply {
-            text = "حفظ الإعدادات"
-            gravity = Gravity.CENTER
-            setPadding(0, 24, 0, 24)
-            setOnClickListener {
-                prefs.edit()
-                    .putBoolean("service_enabled", serviceSwitch.isChecked)
-                    .putBoolean("whatsapp_enabled", whatsappSwitch.isChecked)
-                    .putBoolean("messenger_enabled", messengerSwitch.isChecked)
-                    .putBoolean("chat_ai_enabled", chatAiSwitch.isChecked)
-                    .putString("gemini_api_key", apiKeyInput.text.toString().trim())
-                    .putString("fallback_reply", fallbackReplyInput.text.toString().trim())
-                    .apply()
-                refreshPermissionStatus()
-                Toast.makeText(this@MainActivity, "تم حفظ الإعدادات", Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        val spacer = View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                20
-            )
-        }
-
-        rootLayout.addView(titleText)
-        rootLayout.addView(subtitleText)
-        rootLayout.addView(serviceSwitch)
-        rootLayout.addView(statusValueText)
-        rootLayout.addView(permissionValueText)
-        rootLayout.addView(permissionButton)
-        rootLayout.addView(targetsLabel)
-        rootLayout.addView(whatsappSwitch)
-        rootLayout.addView(messengerSwitch)
-        rootLayout.addView(chatAiSwitch)
-        rootLayout.addView(settingsLabel)
-        rootLayout.addView(apiKeyInput)
-        rootLayout.addView(spacer)
-        rootLayout.addView(fallbackReplyInput)
-        rootLayout.addView(
-            View(this).apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    24
-                )
-            }
-        )
-        rootLayout.addView(saveButton)
-
-        scrollView.addView(rootLayout)
+        scrollView.addView(layout)
         setContentView(scrollView)
-
-        refreshPermissionStatus()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        refreshPermissionStatus()
-    }
-
-    private fun updateStatusLabel(enabled: Boolean) {
-        statusValueText.text = if (enabled) {
-            "حالة الخدمة: مفعّلة"
-        } else {
-            "حالة الخدمة: متوقفة"
-        }
-    }
-
-    private fun refreshPermissionStatus() {
-        val granted = isNotificationListenerEnabled(this)
-        permissionValueText.text = if (granted) {
-            "إذن الإشعارات: ممنوح"
-        } else {
-            "إذن الإشعارات: غير مفعّل بعد"
-        }
-    }
-
-    private fun isNotificationListenerEnabled(context: Context): Boolean {
-        val enabledListeners = Settings.Secure.getString(
-            context.contentResolver,
-            "enabled_notification_listeners"
-        ) ?: return false
-        val componentName = ComponentName(
-            context,
-            "com.almunassiq.ai.NotificationReplyService"
-        )
-        return enabledListeners.split(":").any {
-            ComponentName.unflattenFromString(it) == componentName
-        }
     }
 }
