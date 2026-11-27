@@ -1,112 +1,105 @@
 package com.almunassiq.ai
 
-import android.app.Notification
 import android.app.RemoteInput
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class NotificationReplyService : NotificationListenerService() {
 
-    private val repliedKeys = mutableSetOf<String>()
+    private val serviceJob = SupervisorJob()
+    private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         super.onNotificationPosted(sbn)
-        val notificationItem = sbn ?: return
-        if (notificationItem.isOngoing) return
+        if (sbn == null) return
 
-        val prefs = getSharedPreferences("munassiq_prefs", Context.MODE_PRIVATE)
-        val serviceEnabled = prefs.getBoolean("service_enabled", true)
-        if (!serviceEnabled) return
+        val packageName = sbn.packageName ?: return
+        if (packageName == this.packageName) return
 
-        val pkg = notificationItem.packageName ?: return
-        if (pkg == packageName) return
-        if (!isTargetAppEnabled(pkg, prefs)) return
+        val extras = sbn.notification.extras ?: return
+        val sender = extras.getString("android.title")?.trim().orEmpty()
+        val messageText = extras.getCharSequence("android.text")?.toString()?.trim().orEmpty()
 
-        val notification = notificationItem.notification ?: return
-        val extras = notification.extras ?: Bundle()
-        val messageText = extractMessageText(extras)
-        if (messageText.isBlank()) return
+        if (messageText.isEmpty()) return
 
-        val dedupKey = "${notificationItem.key}|${messageText.hashCode()}"
-        synchronized(repliedKeys) {
-            if (!repliedKeys.add(dedupKey)) return
-            if (repliedKeys.size > 300) {
-                repliedKeys.clear()
-                repliedKeys.add(dedupKey)
+        val replyAction = findReplyAction(sbn) ?: return
+        val remoteInput = replyAction.remoteInputs?.firstOrNull() ?: return
+
+        val prefs = getSharedPreferences("almunassiq_prefs", Context.MODE_PRIVATE)
+        val autoReplyEnabled = prefs.getBoolean("auto_reply_enabled", false)
+        if (!autoReplyEnabled) return
+
+        val apiKey = prefs.getString("gemini_api_key", "")?.trim().orEmpty()
+
+        serviceScope.launch {
+            val replyText = if (apiKey.isNotEmpty()) {
+                try {
+                    val smartReply = withContext(Dispatchers.IO) {
+                        GeminiReplyClient.generateReply(
+                            apiKey = apiKey,
+                            sender = sender,
+                            incomingMessage = messageText,
+                            appPackage = packageName
+                        )
+                    }
+                    smartReply.trim().ifEmpty { buildFallbackReply(sender, messageText) }
+                } catch (_: Exception) {
+                    buildFallbackReply(sender, messageText)
+                }
+            } else {
+                buildFallbackReply(sender, messageText)
             }
+
+            sendDirectReply(replyAction, remoteInput, replyText)
         }
-
-        val replyText = prefs.getString(
-            "fallback_reply",
-            "تم استلام رسالتك، سنرد عليك قريباً."
-        )?.trim().orEmpty()
-        if (replyText.isEmpty()) return
-
-        sendReplyAction(notification, replyText)
     }
 
-    private fun isTargetAppEnabled(
-        pkg: String,
-        prefs: android.content.SharedPreferences
-    ): Boolean {
-        val whatsappEnabled = prefs.getBoolean("whatsapp_enabled", true)
-        val messengerEnabled = prefs.getBoolean("messenger_enabled", true)
-        val chatAiEnabled = prefs.getBoolean("chat_ai_enabled", true)
-
-        val isWhatsapp = pkg == "com.whatsapp" || pkg == "com.whatsapp.w4b"
-        val isMessenger = pkg == "com.facebook.orca" || pkg == "com.facebook.mlite"
-        val isChatAi = pkg.contains("gemini", ignoreCase = true) ||
-            pkg.contains("chatgpt", ignoreCase = true) ||
-            pkg.contains("openai", ignoreCase = true) ||
-            pkg.contains("copilot", ignoreCase = true) ||
-            pkg.contains("claude", ignoreCase = true) ||
-            pkg.contains("telegram", ignoreCase = true)
-
-        return (isWhatsapp && whatsappEnabled) ||
-            (isMessenger && messengerEnabled) ||
-            (isChatAi && chatAiEnabled)
+    private fun findReplyAction(sbn: StatusBarNotification): android.app.Notification.Action? {
+        val actions = sbn.notification.actions ?: return null
+        return actions.firstOrNull { action ->
+            val hasRemoteInput = !action.remoteInputs.isNullOrEmpty()
+            val title = action.title?.toString()?.lowercase().orEmpty()
+            hasRemoteInput && (
+                title.contains("reply") ||
+                    title.contains("رد") ||
+                    title.contains("إرسال") ||
+                    title.contains("ارسال") ||
+                    action.semanticAction == android.app.Notification.Action.SEMANTIC_ACTION_REPLY
+                )
+        } ?: actions.firstOrNull { !it.remoteInputs.isNullOrEmpty() }
     }
 
-    private fun extractMessageText(extras: Bundle): String {
-        val textLines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
-        if (textLines != null && textLines.isNotEmpty()) {
-            val lastLine = textLines.lastOrNull()?.toString()?.trim()
-            if (!lastLine.isNullOrEmpty()) return lastLine
+    private fun sendDirectReply(
+        action: android.app.Notification.Action,
+        remoteInput: RemoteInput,
+        replyText: String
+    ) {
+        try {
+            val intent = Intent()
+            val bundle = Bundle().apply {
+                putCharSequence(remoteInput.resultKey, replyText)
+            }
+            RemoteInput.addResultsToIntent(arrayOf(remoteInput), intent, bundle)
+            action.actionIntent.send(this, 0, intent)
+        } catch (_: Exception) {
         }
-
-        val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim()
-        if (!bigText.isNullOrEmpty()) return bigText
-
-        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim()
-        if (!text.isNullOrEmpty()) return text
-
-        return ""
     }
 
-    private fun sendReplyAction(notification: Notification, replyText: String) {
-        val actions = notification.actions ?: return
-        for (action in actions) {
-            val remoteInputs = action.remoteInputs ?: continue
-            if (remoteInputs.isEmpty()) continue
+    private fun buildFallbackReply(sender: String, incomingMessage: String): String {
+        val who = if (sender.isNotEmpty()) " يا $sender" else ""
+        return "أهلاً$who، تم استلام رسالتك بخصوص: \"$incomingMessage\" وسأرد عليك قريباً."
+    }
 
-            val replyBundle = Bundle()
-            for (input in remoteInputs) {
-                replyBundle.putCharSequence(input.resultKey, replyText)
-            }
-
-            val fillInIntent = Intent().apply {
-                addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
-            }
-            RemoteInput.addResultsToIntent(remoteInputs, fillInIntent, replyBundle)
-
-            try {
-                action.actionIntent?.send(this, 0, fillInIntent)
-                return
-            } catch (_: Exception) {
-            }
-        }
+    override fun onDestroy() {
+        super.onDestroy()
+        serviceJob.cancel()
     }
 }
